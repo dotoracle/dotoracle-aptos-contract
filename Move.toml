@@ -1,0 +1,9 @@
+[package]
+name = 'dotoracle-aptos-contract'
+version = '1.0.0'
+[dependencies.AptosFramework]
+git = 'https://github.com/aptos-labs/aptos-core.git'
+rev = 'main'
+subdir = 'aptos-move/framework/aptos-framework'
+[addresses]
+admin="0x2bb51436741c2470608fa2f2f09e3a322a3014ce03a34f3b809b8494619e5712"
