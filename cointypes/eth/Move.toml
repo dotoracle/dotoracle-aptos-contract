@@ -1,0 +1,11 @@
+[package]
+name = 'dotoracle-eth'
+version = '1.0.0'
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir="aptos-move/framework/aptos-framework/", rev="aptos-cli-v0.3.7" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir="aptos-move/framework/aptos-stdlib/", rev="aptos-cli-v0.3.7" }
+AptosToken = { git = "https://github.com/aptos-labs/aptos-core.git", subdir="aptos-move/framework/aptos-token/", rev="aptos-cli-v0.3.7" }
+
+[addresses]
+dotoracle="0x20819334841da1c7720e93e87c11f19ab026af7c39345004c2bc5ec66ea335ab"
