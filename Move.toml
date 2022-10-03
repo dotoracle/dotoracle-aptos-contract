@@ -1,9 +1,11 @@
 [package]
-name = 'a'
+name = 'dotoracle'
 version = '1.0.0'
-[dependencies.AptosFramework]
-git = 'https://github.com/aptos-labs/aptos-core.git'
-rev = 'main'
-subdir = 'aptos-move/framework/aptos-framework'
+
+[dependencies]
+AptosFramework = { git = "https://github.com/aptos-labs/aptos-core.git", subdir="aptos-move/framework/aptos-framework/", rev="aptos-cli-v0.3.7" }
+AptosStdlib = { git = "https://github.com/aptos-labs/aptos-core.git", subdir="aptos-move/framework/aptos-stdlib/", rev="aptos-cli-v0.3.7" }
+AptosToken = { git = "https://github.com/aptos-labs/aptos-core.git", subdir="aptos-move/framework/aptos-token/", rev="aptos-cli-v0.3.7" }
+
 [addresses]
-admin="0x2bb51436741c2470608fa2f2f09e3a322a3014ce03a34f3b809b8494619e5712"
+dotoracle="0x20819334841da1c7720e93e87c11f19ab026af7c39345004c2bc5ec66ea335ab"
