@@ -1,5 +1,5 @@
 
-module dotoracle::bridge_coin {
+module dotoracle::wrapped_coin {
     use std::signer;
     use std::string:: {Self, String};
     use std::table;
@@ -7,10 +7,10 @@ module dotoracle::bridge_coin {
     use std::secp256k1;
     use std::option;
     use std::bcs;
-    use std::from_bcs;
     use std::hash;
     use aptos_std::event;
     use std::timestamp;
+    
 
     use aptos_framework::account;
     //use std::error;
@@ -36,16 +36,19 @@ module dotoracle::bridge_coin {
     const ERR_INVALID_SIGNATURE: u64 = 8;
     const ERR_INVALID_CHAIN_IDS_INDEX: u64 = 9;
 
-    struct BridgeCoin<phantom CoinType> has key {}
 
-    struct BridgeCoinData<phantom CoinType> has key {
+    const HEX_SYMBOLS: vector<u8> = b"0123456789abcdef";
+
+    struct WrappedCoin<phantom CoinType> has key {}
+
+    struct WrappedCoinData<phantom CoinType> has key {
         origin_chain_id: u64,
         origin_contract_address: String,
         index: u64,
         claimed_ids: table::Table<String, bool>,
-        burn_cap: coin::BurnCapability<BridgeCoin<CoinType>>,
-        freeze_cap: coin::FreezeCapability<BridgeCoin<CoinType>>,
-        mint_cap: coin::MintCapability<BridgeCoin<CoinType>>,
+        burn_cap: coin::BurnCapability<WrappedCoin<CoinType>>,
+        freeze_cap: coin::FreezeCapability<WrappedCoin<CoinType>>,
+        mint_cap: coin::MintCapability<WrappedCoin<CoinType>>,
         add_coin_handle: event::EventHandle<AddCoinEvent<CoinType>>,
         claim_coin_handle: event::EventHandle<ClaimCoinEvent<CoinType>>,
         request_back_handle: event::EventHandle<RequestBackEvent<CoinType>>
@@ -100,7 +103,7 @@ module dotoracle::bridge_coin {
     }
 
     fun assert_bridge_coin_exist<CoinType>() {
-        assert!(!exists<BridgeCoin<CoinType>>(@dotoracle), ERR_COIN_EXIST);
+        assert!(!exists<WrappedCoin<CoinType>>(@dotoracle), ERR_COIN_EXIST);
     }
 
     public fun get_fee_for_address(to_address: address, fee_receiver: address, fee: u64): u64 {
@@ -109,6 +112,19 @@ module dotoracle::bridge_coin {
 
         };
         fee
+    }
+    fun bytes_to_hex_string(bytes: &vector<u8>): String {
+        let length = vector::length(bytes);
+        let buffer = b"0x";
+
+        let i: u64 = 0;
+        while (i < length) {
+            let byte = *vector::borrow(bytes, i);
+            vector::push_back(&mut buffer, *vector::borrow(&mut HEX_SYMBOLS, (byte >> 4 & 0xf as u64)));
+            vector::push_back(&mut buffer, *vector::borrow(&mut HEX_SYMBOLS, (byte & 0xf as u64)));
+            i = i + 1;
+        };
+        string::utf8(buffer)
     }
 
     public entry fun change_fee(account: &signer, bridge_fee: u64) acquires BridgeRegistry {
@@ -140,7 +156,7 @@ module dotoracle::bridge_coin {
         }
     }
 
-    public entry fun add_coin<CoinType>(account: &signer, origin_chain_id: u64, origin_contract_address: String, name: String, symbol: String, decimal: u8) acquires BridgeRegistry, BridgeCoinData {
+    public entry fun add_coin<CoinType>(account: &signer, origin_chain_id: u64, origin_contract_address: String, name: String, symbol: String, decimal: u8) acquires BridgeRegistry, WrappedCoinData {
         assert_bridge_initialized();
         let sender = signer::address_of(account);
         assert!(sender == @dotoracle, ERR_INSUFFICIENT_PERMISSION);
@@ -154,15 +170,16 @@ module dotoracle::bridge_coin {
         assert!(!table::contains(&bridge_registry.origin_coin_info, origin_coin_id), ERR_ORIGIN_COIN_ALREADY_REGISTERED);
         table::add(&mut bridge_registry.origin_coin_info, origin_coin_id, true);
 
-        let (burn_cap, freeze_cap, mint_cap) = coin::initialize<BridgeCoin<CoinType>>(
+        let (burn_cap, freeze_cap, mint_cap) = coin::initialize<WrappedCoin<CoinType>>(
             account,
             name,
             symbol,
             decimal,
             true,
         );
+        coin::register<WrappedCoin<CoinType>>(account);
 
-        move_to(account, BridgeCoinData<CoinType> {
+        move_to(account, WrappedCoinData<CoinType> {
             origin_chain_id,
             origin_contract_address,
             index: 1,
@@ -174,7 +191,7 @@ module dotoracle::bridge_coin {
             claim_coin_handle: account::new_event_handle<ClaimCoinEvent<CoinType>>(account),
             request_back_handle: account::new_event_handle<RequestBackEvent<CoinType>>(account)
         });
-        let bridge_coin_data = borrow_global_mut<BridgeCoinData<CoinType>>(@dotoracle);
+        let bridge_coin_data = borrow_global_mut<WrappedCoinData<CoinType>>(@dotoracle);
         event::emit_event(
             &mut bridge_coin_data.add_coin_handle,
             AddCoinEvent {
@@ -186,24 +203,26 @@ module dotoracle::bridge_coin {
     }
 
     public entry fun register_to_receive_coin<CoinType>(account: &signer) {
-        coin::register<CoinType>(account)
+        coin::register<WrappedCoin<CoinType>>(account)
     }
 
-    public entry fun claim_coin_script<CoinType>(
+
+
+     public entry fun claim_coin_script<CoinType>(
                         account: &signer,
                         to_address: address, 
                         amount: u64, 
                         chain_ids_index: vector<u64>,
                         tx_hash: vector<u8>,
                         signature: vector<u8>,
-                        recovery_id: u8): u64 acquires BridgeRegistry, BridgeCoinData {
+                        recovery_id: u8) acquires BridgeRegistry, WrappedCoinData {
         assert_bridge_coin_exist<CoinType>();
         assert_bridge_initialized();
         let bridge_registry = borrow_global<BridgeRegistry>(@dotoracle);
         let (found, _) = vector::index_of(&bridge_registry.authorized_claimers, &signer::address_of(account));
         assert!(found, ERR_UNAUTHORIZED_CLAIMER);
 
-        let bridge_coin_data = borrow_global_mut<BridgeCoinData<CoinType>>(@dotoracle);
+        let bridge_coin_data = borrow_global_mut<WrappedCoinData<CoinType>>(@dotoracle);
 
         assert!(vector::length(&chain_ids_index) == 4 &&
                 *vector::borrow(&chain_ids_index, 0) == bridge_coin_data.origin_chain_id &&
@@ -216,10 +235,11 @@ module dotoracle::bridge_coin {
         vector::append(&mut bytes_arr, bcs::to_bytes(&chain_ids_index));
         vector::append(&mut bytes_arr, tx_hash);
         
+        //let claim_id = hash::sha2_256(b"test aptos secp256k1");
         let claim_id = hash::sha3_256(bytes_arr);
-        assert!(!table::contains(&bridge_coin_data.claimed_ids, from_bcs::to_string(claim_id)), ERR_ALREADY_CLAIMED);
+        assert!(!table::contains(&bridge_coin_data.claimed_ids, bytes_to_hex_string(&claim_id)), ERR_ALREADY_CLAIMED);
 
-        table::add(&mut bridge_coin_data.claimed_ids, from_bcs::to_string(claim_id), true);
+        table::add(&mut bridge_coin_data.claimed_ids, bytes_to_hex_string(&claim_id), true);
 
         assert!(is_signature_valid(claim_id, recovery_id, signature, bridge_registry.mpc_pubkey), ERR_INVALID_SIGNATURE);
 
@@ -231,12 +251,12 @@ module dotoracle::bridge_coin {
         let recipient_amount = amount - fee_amount;
        
         if (fee_amount > 0) {
-            let fee_coin = coin::mint<BridgeCoin<CoinType>>(fee_amount, mint_cap);
-            coin::deposit<BridgeCoin<CoinType>>(bridge_registry.fee_receiver, fee_coin);
+            let fee_coin = coin::mint<WrappedCoin<CoinType>>(fee_amount, mint_cap);
+            coin::deposit<WrappedCoin<CoinType>>(bridge_registry.fee_receiver, fee_coin);
         };
 
-        let recipient_coin = coin::mint<BridgeCoin<CoinType>>(recipient_amount, mint_cap);
-        coin::deposit<BridgeCoin<CoinType>>(to_address, recipient_coin);
+        let recipient_coin = coin::mint<WrappedCoin<CoinType>>(recipient_amount, mint_cap);
+        coin::deposit<WrappedCoin<CoinType>>(to_address, recipient_coin);
 
         event::emit_event (
             &mut bridge_coin_data.claim_coin_handle,
@@ -253,8 +273,10 @@ module dotoracle::bridge_coin {
             }
         );
 
-        amount  
+       // amount  
     }
+
+
 
     public fun is_signature_valid(message: vector<u8>, recovery_id: u8, signature: vector<u8>, mpc_pubkey: vector<u8>): bool {
         assert_bridge_initialized();
@@ -277,7 +299,7 @@ module dotoracle::bridge_coin {
                     account: &signer, 
                     to_address: String, 
                     amount: u64, 
-                    to_chain_id: u64) acquires BridgeRegistry, BridgeCoinData {
+                    to_chain_id: u64) acquires BridgeRegistry, WrappedCoinData {
         assert_bridge_coin_exist<CoinType>();
         assert_bridge_initialized();
         let bridge_registry = borrow_global_mut<BridgeRegistry>(@dotoracle);
@@ -290,13 +312,13 @@ module dotoracle::bridge_coin {
         let request_amount = amount - fee_amount;
 
         if (fee_amount > 0) {
-            let fee_coin = coin::withdraw<BridgeCoin<CoinType>>(account, fee_amount);
-            coin::deposit<BridgeCoin<CoinType>>(bridge_registry.fee_receiver, fee_coin);
+            let fee_coin = coin::withdraw<WrappedCoin<CoinType>>(account, fee_amount);
+            coin::deposit<WrappedCoin<CoinType>>(bridge_registry.fee_receiver, fee_coin);
         };
-        let request_coin = coin::withdraw<BridgeCoin<CoinType>>(account, request_amount);
-        let bridge_coin_data = borrow_global_mut<BridgeCoinData<CoinType>>(@dotoracle);
+        let request_coin = coin::withdraw<WrappedCoin<CoinType>>(account, request_amount);
+        let bridge_coin_data = borrow_global_mut<WrappedCoinData<CoinType>>(@dotoracle);
         // burn coin
-        coin::burn<BridgeCoin<CoinType>>(request_coin, &bridge_coin_data.burn_cap);
+        coin::burn<WrappedCoin<CoinType>>(request_coin, &bridge_coin_data.burn_cap);
 
         // emit events
         event::emit_event (
